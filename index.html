@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="de"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<title>NIRU PV-Planer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: schmale Werkzeugspalte links, Zeichenfläche und Ergebnisse rechts. Ein Arbeitsgerät, kein Schaufenster. */
+:root{
+  --bg:#f1f4f5; --panel:#ffffff; --fg:#14212b; --muted:#5a6a75; --line:#d3dbe0;
+  --accent:#0d6a7a; --accent-fg:#ffffff; --soft:#e4eef0; --canvas:#e8edef; --grid:#cfd8dc;
+  --ok:#1b7a44; --warn:#a86300; --bad:#b42318;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e1418; --panel:#162027; --fg:#e5ecf0; --muted:#94a4af; --line:#27343d;
+  --accent:#53b6c6; --accent-fg:#06161a; --soft:#1c2c33; --canvas:#1a252c; --grid:#2a3943;
+  --ok:#5fcf8a; --warn:#e2a64a; --bad:#f4796c; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#0e1418; --panel:#162027; --fg:#e5ecf0; --muted:#94a4af; --line:#27343d;
+  --accent:#53b6c6; --accent-fg:#06161a; --soft:#1c2c33; --canvas:#1a252c; --grid:#2a3943;
+  --ok:#5fcf8a; --warn:#e2a64a; --bad:#f4796c; color-scheme:dark;}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.45;
+  padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font-size:18px;margin:0;font-weight:600;letter-spacing:.01em}
+h2{font-size:12px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+header{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:14px}
+header span{color:var(--muted);font-size:13px}
+.app{display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);gap:16px;align-items:start}
+@media(max-width:900px){.app{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;margin-bottom:14px;min-width:0}
+label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+input,select,button,textarea{font:inherit;color:var(--fg)}
+input[type=text],input[type=number],select,textarea{width:100%;padding:6px 8px;background:var(--bg);border:1px solid var(--line);border-radius:4px}
+input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+button{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+button.on{background:var(--soft);border-color:var(--accent)}
+.tools{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.hint{font-size:12px;color:var(--muted);margin:6px 0 0}
+.flist{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.flist button.sel{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+canvas{display:block;width:100%;height:auto;background:var(--canvas);border:1px solid var(--line);border-radius:4px;touch-action:none;cursor:crosshair}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:12px}
+.kpi{background:var(--soft);border-radius:4px;padding:8px 10px}
+.kpi b{display:block;font-family:var(--mono);font-size:20px;font-weight:500;font-variant-numeric:tabular-nums}
+.kpi small{color:var(--muted)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600}
+.pill.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.pill.bad{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.msg{font-size:13px;margin:6px 0}.msg.bad{color:var(--bad)}.msg.warn{color:var(--warn)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.mono{font-family:var(--mono)}
+details>summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:8px}
+.inline{display:flex;gap:6px;align-items:end;margin-top:8px}
+.inline>div{flex:1}
+[hidden]{display:none!important}
+.maplibregl-map{font-family:var(--sans)}
+</style>
+</head>
+<body>
+
+<header><h1>NIRU PV-Planer</h1><span>Entwurfsstand mit Karte. Beispielprojekt geladen.</span></header>
+<div class="app">
+ <div>
+  <div class="panel"><h2>Projekt</h2>
+   <label for="kunde">Kunde</label><input type="text" id="kunde" value="Max Mustermann">
+   <label for="adresse">Anlagenadresse</label><input type="text" id="adresse" value="Musterstraße 1, 32457 Porta Westfalica">
+  </div>
+  <div class="panel"><h2>Geräte</h2>
+   <label for="modul">Modul</label><select id="modul"></select>
+   <label for="wr">Wechselrichter</label><select id="wr"></select>
+   <div class="row"><div><label for="spserie">Speicher</label><select id="spserie"></select></div>
+   <div><label for="spn">Module</label><input type="number" id="spn" min="0" max="14" value="5"></div></div>
+   <div class="row"><div><label for="tmin">Tmin (°C)</label><input type="number" id="tmin" value="-10"></div>
+   <div><label for="tmax">Zelle max. (°C)</label><input type="number" id="tmax" value="70"></div></div>
+  </div>
+  <div class="panel"><h2>Dachflächen</h2>
+   <div class="flist" id="flist"></div>
+   <div class="row"><button id="addF">+ Fläche</button><button id="delF">Fläche löschen</button></div>
+   <label for="fname">Name</label><input type="text" id="fname">
+   <div class="row"><div><label for="faz">Ausrichtung (°)</label><input type="number" id="faz" min="0" max="359"></div>
+   <div><label for="fneig">Neigung (°)</label><input type="number" id="fneig" min="0" max="60"></div></div>
+   <p class="hint">Ausrichtung: Richtung, in die das Dach schaut (Süd 180, Ost 90, West 270). Bild oben = Norden.</p>
+   <div class="row"><div><label for="fdt">Dachtyp</label><select id="fdt"><option value="ziegel">Ziegel</option><option value="trapezblech">Trapezblech</option><option value="stehfalz">Stehfalz</option><option value="flachdach">Flachdach (manuell)</option><option value="balkon">Balkon</option></select></div>
+   <div><label for="fausr">Module</label><select id="fausr"><option value="hochkant">hochkant</option><option value="quer">quer</option></select></div></div>
+   <div class="row"><div><label for="frand">Randabstand (m)</label><input type="number" id="frand" step="0.05" min="0"></div>
+   <div><label for="fhab">Hindernisabstand (m)</label><input type="number" id="fhab" step="0.05" min="0"></div></div>
+  </div>
+ </div>
+ <div style="min-width:0">
+  <div class="panel"><h2>Dachzeichnung</h2>
+   <div class="row" style="margin-bottom:6px"><div><label for="modus">Ansicht</label><select id="modus"><option value="karte">Karte (Luftbild)</option><option value="bild">Bild / Raster</option></select></div>
+   <div id="kartenWahl"><label for="basis">Karte</label><select id="basis"><option value="nrw">Luftbild NRW (DOP)</option><option value="rlp">Luftbild Rheinland-Pfalz (ungeprüft)</option><option value="osm">OpenStreetMap</option></select></div></div>
+   <div class="inline" id="suchBox" style="margin-bottom:10px"><div><label for="suche">Adresse suchen</label><input type="text" id="suche" placeholder="Straße Nr, Ort"></div><button id="bSuche">Suchen</button></div>
+   <div class="tools">
+    <button id="bImg">Bild laden</button><input type="file" id="fileImg" accept="image/*" hidden>
+    <button id="bScale">Maßstab setzen</button>
+    <button id="bDach">Dach zeichnen</button>
+    <button id="bHind">Hindernis zeichnen</button>
+    <button id="bFertig">Fertig</button>
+    <button id="bClear">Fläche leeren</button>
+   </div>
+   <div id="map" style="height:560px;border:1px solid var(--line);border-radius:4px"></div>
+   <canvas id="cv" width="1000" height="560"></canvas>
+   <div id="scaleBox" class="inline" hidden>
+    <div><label for="scaleLen">Länge der markierten Strecke (m)</label><input type="number" id="scaleLen" step="0.01" min="0.1"></div>
+    <button class="primary" id="scaleOk">Übernehmen</button>
+   </div>
+   <div class="inline" id="rectBox">
+    <div><label for="rb">Rechteck: Breite an der Traufe (m)</label><input type="number" id="rb" step="0.1" value="10"></div>
+    <div><label for="rt">Tiefe im Grundriss (m)</label><input type="number" id="rt" step="0.1" value="5"></div>
+    <button id="rOk">Rechteck-Dach</button>
+   </div>
+   <p class="hint" id="status"></p>
+   <p class="hint">Karte: Adresse suchen, bis zum Dach zoomen, „Dach zeichnen“ wählen und die Ecken anklicken. Nord ist oben. Luftbild NRW: Geobasis NRW, Datenlizenz Deutschland Zero 2.0. Apple Karten sind nur als Anzeige möglich und noch nicht eingebunden.</p>
+  </div>
+  <div class="panel"><div class="tools"><button class="primary" id="bCalc">Berechnen</button></div>
+   <div class="kpis" id="kpis"></div>
+   <h2>Belegung je Fläche</h2><div class="tw" id="tFl"></div>
+   <h2 style="margin-top:16px">Stringplan</h2><div class="tw" id="tStr"></div><div id="msgStr"></div>
+   <h2 style="margin-top:16px">Speicher</h2><div id="msgSp"></div>
+   <h2 style="margin-top:16px">Ertragswerte</h2>
+   <div class="inline"><div><label for="loss">Systemverluste (%)</label><input type="number" id="loss" value="14" min="0" max="40"></div><button id="bErtrag">Ertrag berechnen (PVGIS)</button></div>
+   <div id="tErt"></div>
+  </div>
+  <div class="panel"><h2>Stückliste</h2>
+   <div class="tools"><button id="bCopy">In Zwischenablage kopieren</button></div>
+   <div class="tw" id="tBom"></div>
+   <details id="rawBox"><summary>Text zum Kopieren</summary><textarea id="raw" rows="6" readonly></textarea></details>
+  </div>
+ </div>
+</div>
+<script>
+const DB = {"meta":{"version":"0.1","stand":"2026-10-30","hinweis":"Werte aus Herstellerdatenblättern. Keine Preise. Felder mit 'pruefen' sind noch zu bestätigen.","ausgeschlossen":["Deye GB-L Lite","Deye Niedervolt SG05LP3","Deye 800-W-Balkonwechselrichter (zurückgestellt)"]},"module":[{"id":"JAM54D41-460/LR","hersteller":"JA Solar","typ":"n-type Double Glass Monofacial, schwarz","pmax_wp":460,"voc_v":40.6,"vmp_v":33.68,"isc_a":14.43,"imp_a":13.66,"wirkungsgrad_pct":23.0,"tk_voc_pct_pro_k":-0.25,"tk_isc_pct_pro_k":0.045,"tk_pmax_pct_pro_k":-0.29,"max_systemspannung_v":1500,"reihensicherung_a":25,"betriebstemperatur_c":[-40,85],"laenge_mm":1762,"breite_mm":1134,"dicke_mm":30,"gewicht_kg":22,"zellen":108,"bifazial":false},{"id":"JAM60D41-500/LB","hersteller":"JA Solar","typ":"n-type Double Glass Bifacial, schwarz","pmax_wp":500,"voc_v":45.0,"vmp_v":38.26,"isc_a":14.05,"imp_a":13.07,"wirkungsgrad_pct":22.6,"tk_voc_pct_pro_k":-0.25,"tk_isc_pct_pro_k":0.045,"tk_pmax_pct_pro_k":-0.29,"max_systemspannung_v":1500,"reihensicherung_a":30,"betriebstemperatur_c":[-40,85],"laenge_mm":1953,"breite_mm":1134,"dicke_mm":30,"gewicht_kg":27.3,"zellen":120,"bifazial":true,"bifazialitaet_pct":"80 +/-10"}],"wechselrichter_serien":[{"serie":"SUN-5/6/8/10/12/15/20/25K-SG01HP3-EU-AM2","hersteller":"Deye","quelle":"Datenblatt deutsch (vom Nutzer geliefert)","pv":{"max_spannung_v":1000,"start_spannung_v":180,"mppt_bereich_v":[150,800],"pruefen_mppt":"Neuere Deye-Datenblätter nennen 150-850 V. Hier konservativ 800 V.","nennspannung_v":600},"batterie":{"typ":"Li-Ion","spannung_v":[160,700],"eingaenge":2},"allgemein":{"wirkungsgrad_max_pct":97.6,"ip":"IP65","masse_mm":[408,638,237],"gewicht_kg":30.5,"passthrough_a":[40,80]},"modelle":[{"modell":"SUN-5K-SG01HP3-EU-AM2","ac_nenn_w":5000,"ac_scheinleistung_va":5500,"ac_strom_max_a":[8.4,8],"pv_eingang_w":6500,"mppt":{"anzahl":2,"strings":[1,1],"strom_betrieb_a":[20,20],"strom_isc_a":[30,30]},"batterie_strom_a":30},{"modell":"SUN-6K-SG01HP3-EU-AM2","ac_nenn_w":6000,"ac_scheinleistung_va":6600,"ac_strom_max_a":[10,9.6],"pv_eingang_w":7800,"mppt":{"anzahl":2,"strings":[1,1],"strom_betrieb_a":[20,20],"strom_isc_a":[30,30]},"batterie_strom_a":30},{"modell":"SUN-8K-SG01HP3-EU-AM2","ac_nenn_w":8000,"ac_scheinleistung_va":8800,"ac_strom_max_a":[13.4,12.8],"pv_eingang_w":10400,"mppt":{"anzahl":2,"strings":[1,1],"strom_betrieb_a":[20,20],"strom_isc_a":[30,30]},"batterie_strom_a":37},{"modell":"SUN-10K-SG01HP3-EU-AM2","ac_nenn_w":10000,"ac_scheinleistung_va":11000,"ac_strom_max_a":[16.7,16],"pv_eingang_w":13000,"mppt":{"anzahl":2,"strings":[1,1],"strom_betrieb_a":[20,20],"strom_isc_a":[30,30]},"batterie_strom_a":37},{"modell":"SUN-12K-SG01HP3-EU-AM2","ac_nenn_w":12000,"ac_scheinleistung_va":13200,"ac_strom_max_a":[20,19.2],"pv_eingang_w":15600,"mppt":{"anzahl":2,"strings":[2,1],"strom_betrieb_a":[26,20],"strom_isc_a":[39,30]},"batterie_strom_a":37},{"modell":"SUN-15K-SG01HP3-EU-AM2","ac_nenn_w":15000,"ac_scheinleistung_va":16500,"ac_strom_max_a":[25,24],"pv_eingang_w":19500,"mppt":{"anzahl":2,"strings":[2,1],"strom_betrieb_a":[26,20],"strom_isc_a":[39,30]},"batterie_strom_a":37},{"modell":"SUN-20K-SG01HP3-EU-AM2","ac_nenn_w":20000,"ac_scheinleistung_va":22000,"ac_strom_max_a":[33.4,31.9],"pv_eingang_w":26000,"mppt":{"anzahl":2,"strings":[2,2],"strom_betrieb_a":[26,26],"strom_isc_a":[39,39]},"batterie_strom_a":37},{"modell":"SUN-25K-SG01HP3-EU-AM2","ac_nenn_w":25000,"ac_scheinleistung_va":27500,"ac_strom_max_a":[41.7,39.9],"pv_eingang_w":32500,"mppt":{"anzahl":2,"strings":[2,2],"strom_betrieb_a":[26,26],"strom_isc_a":[39,39]},"batterie_strom_a":50,"pv_nennspannung_v":700}]},{"serie":"SUN-5/6/8/10/12K-SG01HP3-EU-DM2","hersteller":"Deye","quelle":"Deye Datenblatt 2025-09","pv":{"max_spannung_v":1000,"start_spannung_v":180,"mppt_bereich_v":[150,850],"nennspannung_v":600},"batterie":{"typ":"Li-Ion","spannung_v":[160,700],"eingaenge":1,"strom_a":37},"allgemein":{"wirkungsgrad_max_pct":97.6,"ip":"IP65","masse_mm":[376,470,244.5],"gewicht_kg":24.5,"passthrough_a":35},"mppt_gemeinsam":{"anzahl":2,"strings":[1,1],"strom_betrieb_a":[18,18],"strom_isc_a":[27,27]},"modelle":[{"modell":"SUN-5K-SG01HP3-EU-DM2","ac_nenn_w":5000,"ac_scheinleistung_va":5500,"ac_strom_max_a":[8.4,8],"pv_zugang_w":10000,"pv_eingang_w":8000},{"modell":"SUN-6K-SG01HP3-EU-DM2","ac_nenn_w":6000,"ac_scheinleistung_va":6600,"ac_strom_max_a":[10,9.6],"pv_zugang_w":12000,"pv_eingang_w":9600},{"modell":"SUN-8K-SG01HP3-EU-DM2","ac_nenn_w":8000,"ac_scheinleistung_va":8800,"ac_strom_max_a":[13.4,12.8],"pv_zugang_w":16000,"pv_eingang_w":12800},{"modell":"SUN-10K-SG01HP3-EU-DM2","ac_nenn_w":10000,"ac_scheinleistung_va":11000,"ac_strom_max_a":[16.7,16],"pv_zugang_w":20000,"pv_eingang_w":16000},{"modell":"SUN-12K-SG01HP3-EU-DM2","ac_nenn_w":12000,"ac_scheinleistung_va":13200,"ac_strom_max_a":[20,19.2],"pv_zugang_w":24000,"pv_eingang_w":19200}]},{"serie":"SUN-5/6/8/10/12K-SG02HP3-EU-DM2","hersteller":"Deye","quelle":"Deye Datenblatt 2026-09-11","pv":{"max_spannung_v":1000,"start_spannung_v":130,"mppt_bereich_v":[150,850],"nennspannung_v":600},"batterie":{"typ":"Li-Ion","spannung_v":[150,700],"eingaenge":1,"strom_a":55,"pruefen":"Datenblatt: 130-700 V und '37 55' A ohne Zuordnung. Hier konservativ 150 V (Deye-Broschüre) und 55 A nur für 10K/12K."},"allgemein":{"wirkungsgrad_max_pct":97.6,"ip":"IP65","passthrough_a":35,"gewicht_kg":null},"mppt_gemeinsam":{"anzahl":2,"strings":[1,1],"strom_betrieb_a":[20,20],"strom_isc_a":[30,30]},"modelle":[{"modell":"SUN-5K-SG02HP3-EU-DM2","ac_nenn_w":5000,"ac_scheinleistung_va":5500,"ac_strom_max_a":[8.4,8],"pv_zugang_w":10000,"pv_eingang_w":8000,"batterie_strom_a":37},{"modell":"SUN-6K-SG02HP3-EU-DM2","ac_nenn_w":6000,"ac_scheinleistung_va":6600,"ac_strom_max_a":[10,9.6],"pv_zugang_w":12000,"pv_eingang_w":9600,"batterie_strom_a":37},{"modell":"SUN-8K-SG02HP3-EU-DM2","ac_nenn_w":8000,"ac_scheinleistung_va":8800,"ac_strom_max_a":[13.4,12.8],"pv_zugang_w":16000,"pv_eingang_w":12800,"batterie_strom_a":37},{"modell":"SUN-10K-SG02HP3-EU-DM2","ac_nenn_w":10000,"ac_scheinleistung_va":11000,"ac_strom_max_a":[16.7,16],"pv_zugang_w":20000,"pv_eingang_w":16000,"batterie_strom_a":55},{"modell":"SUN-12K-SG02HP3-EU-DM2","ac_nenn_w":12000,"ac_scheinleistung_va":13200,"ac_strom_max_a":[20,19.2],"pv_zugang_w":24000,"pv_eingang_w":19200,"batterie_strom_a":55}]},{"serie":"SUN-15/20/25K-SG02HP3-EU-DM3","hersteller":"Deye","quelle":"Deye Datenblatt 2026-09-11","pv":{"max_spannung_v":1000,"start_spannung_v":180,"mppt_bereich_v":[150,850],"nennspannung_v":600},"batterie":{"typ":"Li-Ion","spannung_v":[160,700],"eingaenge":1,"strom_a":55},"allgemein":{"wirkungsgrad_max_pct":97.6,"ip":"IP65","passthrough_a":60,"gewicht_kg":null},"mppt_gemeinsam":{"anzahl":3,"strings":[2,1,1],"strom_betrieb_a":[36,20,20],"strom_isc_a":[54,30,30]},"modelle":[{"modell":"SUN-15K-SG02HP3-EU-DM3","ac_nenn_w":15000,"ac_scheinleistung_va":16500,"ac_strom_max_a":[25,24],"pv_zugang_w":30000,"pv_eingang_w":24000},{"modell":"SUN-20K-SG02HP3-EU-DM3","ac_nenn_w":20000,"ac_scheinleistung_va":22000,"ac_strom_max_a":[33.4,31.9],"pv_zugang_w":40000,"pv_eingang_w":32000},{"modell":"SUN-25K-SG02HP3-EU-DM3","ac_nenn_w":25000,"ac_scheinleistung_va":27500,"ac_strom_max_a":[41.7,39.9],"pv_zugang_w":50000,"pv_eingang_w":40000}]},{"serie":"SUN-25/29.9/30K-SG02HP3-EU-AM3","hersteller":"Deye","quelle":"Deye Datenblatt 2026-07-06 und vom Nutzer geliefertes PDF","pv":{"max_spannung_v":1000,"start_spannung_v":180,"mppt_bereich_v":[150,850],"nennspannung_v":600},"batterie":{"typ":"Li-Ion","spannung_v":[160,700],"eingaenge":1,"strom_a":75},"allgemein":{"wirkungsgrad_max_pct":98.5,"ip":"IP65","masse_mm":[448,688,270],"gewicht_kg":46,"passthrough_a":80},"mppt_gemeinsam":{"anzahl":3,"strings":[2,2,2],"strom_betrieb_a":[36,36,36],"strom_isc_a":[54,54,54]},"modelle":[{"modell":"SUN-25K-SG02HP3-EU-AM3","ac_nenn_w":25000,"ac_scheinleistung_va":27500,"ac_strom_max_a":[41.7,39.9],"pv_zugang_w":50000,"pv_eingang_w":40000},{"modell":"SUN-29.9K-SG02HP3-EU-AM3","ac_nenn_w":29900,"ac_scheinleistung_va":29900,"ac_strom_max_a":[45.4,43.4],"pv_zugang_w":59800,"pv_eingang_w":47840},{"modell":"SUN-30K-SG02HP3-EU-AM3","ac_nenn_w":30000,"ac_scheinleistung_va":33000,"ac_strom_max_a":[50,47.9],"pv_zugang_w":60000,"pv_eingang_w":48000}]}],"speicher_serien":[{"serie":"GB-L Plus","hersteller":"Deye","modul":"GB-L-Pack5.76-A7","modul_energie_kwh":5.76,"modul_nennspannung_v":57.6,"modul_kapazitaet_ah":100,"module_in_reihe":[2,14],"betriebsspannung_pro_modul_v":[45.0,65.7],"strom_dauer_a":75,"strom_laden_spitze_a":{"wert":104,"dauer_s":15},"strom_entladen_spitze_a":{"wert":135,"dauer_s":120},"temperatur_laden_c":[0,55],"temperatur_entladen_c":[-20,55],"heizung":false,"ip":"IP66","masse_mm_grundflaeche":[610,385],"hoehe_mm_formel":"140*n + 177","gewicht_kg_formel":"49*n + 24","garantie_jahre":10,"zertifikate":["IEC 62619","IEC 62040","VDE 2510-50","UN38.3","CE-EMC"],"pruefen":"Zertifizierungsstand VDE/IEC 62040 laut Deye zum 09/2026; vor Netzbetreiberantrag aktuelle Nachweise einholen. 2-Modul-Variante nur in der Produktvorstellung, 3-14 in der Broschüre."},{"serie":"GB-L Ultra","hersteller":"Deye","modul":"GB-L-Pack5.76-H7","modul_energie_kwh":5.76,"modul_nennspannung_v":57.6,"modul_kapazitaet_ah":100,"module_in_reihe":[2,14],"betriebsspannung_pro_modul_v":[45.0,65.7],"strom_dauer_a":75,"strom_laden_spitze_a":{"wert":104,"dauer_s":15},"strom_entladen_spitze_a":{"wert":135,"dauer_s":120},"temperatur_laden_c":[-20,55],"temperatur_entladen_c":[-20,55],"heizung":true,"ip":"IP66","masse_mm_grundflaeche":[610,385],"hoehe_mm_formel":"140*n + 177","gewicht_kg_formel":"49*n + 24","garantie_jahre":10,"zertifikate":["IEC 62619","IEC 62040","VDE","CEC","UN38.3","CE-EMC"],"pruefen":"CEC laut Deye erst 2027."},{"serie":"GB-L Pro","hersteller":"Deye","modul":"GB-L-Pro-Pack-4.1-2","modul_energie_kwh":4.096,"modul_energie_kwh_datenblatt":4,"modul_nennspannung_v":102.4,"modul_kapazitaet_ah":40,"module_in_reihe":[2,6],"system_betriebsspannung_v":[166.4,700.8],"strom_empfohlen_a":20,"strom_dauer_a":40,"strom_entladen_spitze_a":{"wert":50,"dauer_s":120},"temperatur_laden_c":[-20,55],"temperatur_entladen_c":[-20,55],"heizung":false,"ip":"IP65","masse_mm_grundflaeche":[540,385],"hoehe_mm_formel":"220*n + 210","gewicht_kg_formel":"39*n + 19","garantie_jahre":10,"zertifikate":["CE","IEC 62619","VDE 2510-50","UN38.3"],"pruefen":"Obergrenze 700,8 V liegt über 700 V der Wechselrichter-Batterieeingänge. Bei 6 Modulen Warnung ausgeben."}],"empfohlene_kombinationen_deye":[{"wechselrichter":"SUN-10K-SG02HP3-EU-DM2","speicher":"GB-L17 Plus (3 Module)"},{"wechselrichter":"SUN-12K-SG02HP3-EU-DM2","speicher":"GB-L23 Plus (4 Module)"},{"wechselrichter":"SUN-15K-SG02HP3-EU-DM3","speicher":"GB-L28 Plus (5 Module)"},{"wechselrichter":"SUN-20K-SG02HP3-EU-DM3","speicher":"GB-L40 Plus (7 Module)"},{"wechselrichter":"SUN-25K-SG02HP3-EU-DM3","speicher":"GB-L51 Plus (9 Module)"},{"wechselrichter":"SUN-25K-SG02HP3-EU-AM3","speicher":"GB-L34 Plus (6 Module)"},{"wechselrichter":"SUN-30K-SG02HP3-EU-AM3","speicher":"GB-L40 Plus (7 Module)"}],"montage":{"schiene_laengen_m":{"aktuell":4.2,"kuenftig":3.6},"standardwerte":{"hakenabstand_mittel_m":1.1,"hakenabstand_max_m":1.4,"ueberstand_ueber_letzten_haken_m":0.3,"ueberstand_ueber_letztes_modul_m":0.1,"reststueck_min_m":1.0},"teile":[{"artikel":"NIRU-A43A","bezeichnung":"Montageschiene Aluminium schwarz (Schnell Klick-System)","laenge_m":4.2,"dachtypen":["ziegel","trapezblech","stehfalz"]},{"artikel":"NIRU-SP-A43A","bezeichnung":"Schienenverbinder, gesteckt","laenge_mm":150,"dachtypen":["ziegel","trapezblech","stehfalz"]},{"artikel":"NIRU-HA02","bezeichnung":"Aluminiumhaken verstellbar, Heavy, inkl. Klick-Halter und Schrauben M6x80","dachtypen":["ziegel"]},{"artikel":"NIRU-RIC03","bezeichnung":"Mittelklemme schwarz, 50 mm, M8x38","dachtypen":["ziegel","trapezblech","stehfalz"]},{"artikel":"NIRU-REC03","bezeichnung":"Endklemme schwarz, 50 mm, M8x38","dachtypen":["ziegel","trapezblech","stehfalz"]},{"artikel":"NIRU-EC-A43A","bezeichnung":"Endkappe schwarz für A43A-Schiene","dachtypen":["ziegel","trapezblech","stehfalz"]},{"artikel":"NIRU-RC-A43","bezeichnung":"Profilklammer für Kreuzverbund","dachtypen":["ziegel"],"nur_bei":"kreuzverbund"},{"artikel":"NIRU-U40","bezeichnung":"U40-Schiene für Trapezblech, Komplett-Set mit M6x25 Schrauben","laenge_mm":350,"dachtypen":["trapezblech"]},{"artikel":"NIRU-L01","bezeichnung":"Stehfalzklemme AL6005-T5","dachtypen":["stehfalz"]},{"artikel":"NIRU SBR02","bezeichnung":"Balkonhalterung für 1 Modul, Winkel verstellbar, Aluminium","dachtypen":["balkon"],"menge_pro_modul":1},{"artikel":"NIRU-AR02","bezeichnung":"Aufständerungsdreieck Silber, 30° stufenlos, 1,30 m, fertig montiert","dachtypen":["flachdach"],"stueckliste":"manuell"},{"artikel":"NIRU-BR6","bezeichnung":"Flachdach-Aufständerung Süd und Ost-West (Standfüße, Endklemmen, Windschutz, Verbinder)","dachtypen":["flachdach"],"stueckliste":"manuell","pruefen":"Artikelnummer gilt laut Liste für Süd und Ost-West. Bodenplatten manuell."}],"flachdach":{"sued_neigung_grad":30,"ost_west_neigung_grad":10}}};
+const STD = DB.montage.standardwerte;
+const COL = ['#2b6cb0','#c05621','#2f855a','#805ad5','#b7791f','#0e7c86'];
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = (x, d=1) => Number(x).toLocaleString('de-DE', {minimumFractionDigits:d, maximumFractionDigits:d});
+
+/* ---------- Gerätedaten ---------- */
+const modul = id => DB.module.find(m => m.id === id);
+function wrFind(model){ for(const s of DB.wechselrichter_serien) for(const w of s.modelle) if(w.modell===model) return [s,w]; }
+const TEILE = Object.fromEntries(DB.montage.teile.map(t => [t.artikel, t]));
+
+/* ---------- Geometrie ---------- */
+function inPoly(p, poly){
+  let c=false; for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[i], b=poly[j];
+    if((a[1]>p[1])!==(b[1]>p[1]) && p[0] < (b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0]) c=!c; }
+  return c;
+}
+function segX(a,b,c,d){
+  const o=(p,q,r)=>(q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0]); const e=1e-9;
+  const d1=o(a,b,c), d2=o(a,b,d), d3=o(c,d,a), d4=o(c,d,b);
+  return ((d1>e&&d2<-e)||(d1<-e&&d2>e)) && ((d3>e&&d4<-e)||(d3<-e&&d4>e));
+}
+const corners = r => [[r[0],r[1]],[r[2],r[1]],[r[2],r[3]],[r[0],r[3]]];
+function edgesCross(r, poly){
+  const c=corners(r);
+  for(let i=0;i<4;i++) for(let j=0;j<poly.length;j++) if(segX(c[i],c[(i+1)%4],poly[j],poly[(j+1)%poly.length])) return true;
+  return false;
+}
+function rectInside(r, poly){
+  if(!corners(r).every(c=>inPoly(c,poly))) return false;
+  if(edgesCross(r,poly)) return false;
+  const e=1e-9; return !poly.some(p=>p[0]>r[0]+e&&p[0]<r[2]-e&&p[1]>r[1]+e&&p[1]<r[3]-e);
+}
+function rectOverlaps(r, poly){
+  if(corners(r).some(c=>inPoly(c,poly))) return true;
+  if(poly.some(p=>p[0]>r[0]&&p[0]<r[2]&&p[1]>r[1]&&p[1]<r[3])) return true;
+  return edgesCross(r,poly);
+}
+const grow = (r,d) => [r[0]-d,r[1]-d,r[2]+d,r[3]+d];
+
+/* ---------- Schritt 2: Belegung ---------- */
+function belegen(dach, m, ausr, rand, spalt, hind, hAbst){
+  const L=m.laenge_mm/1000, B=m.breite_mm/1000, [w,h]= ausr==='hochkant'?[B,L]:[L,B];
+  const xs=dach.map(p=>p[0]), ys=dach.map(p=>p[1]);
+  const minx=Math.min(...xs)+rand, maxx=Math.max(...xs)-rand, miny=Math.min(...ys)+rand, maxy=Math.max(...ys)-rand;
+  const fits=(x,y)=>{ const r=[x,y,x+w,y+h];
+    if(!rectInside(grow(r,rand),dach)) return false;
+    const g=grow(r,hAbst); return !hind.some(p=>rectOverlaps(g,p)); };
+  let best=[]; const steps=Math.max(1,Math.floor((h+spalt)/0.10));
+  for(let k=0;k<steps;k++){
+    let y=miny+k*0.10; const list=[];
+    while(y+h<=maxy+1e-9){ let x=minx;
+      while(x+w<=maxx+1e-9){ if(fits(x,y)){ list.push([x,y,x+w,y+h]); x+=w+spalt; } else x+=0.02; }
+      y+=h+spalt; }
+    if(list.length>best.length) best=list;
+  }
+  return best;
+}
+function gruppen(rects, spalt=0.02){
+  const rows={}; for(const r of rects){ const k=r[1].toFixed(3); (rows[k]=rows[k]||[]).push(r); }
+  const out=[]; for(const k of Object.keys(rows).sort((a,b)=>a-b)){
+    const l=rows[k].sort((a,b)=>a[0]-b[0]); let g=[l[0]];
+    for(const r of l.slice(1)){ if(r[0]-g[g.length-1][2] <= spalt+0.005) g.push(r); else { out.push(g); g=[r]; } }
+    out.push(g); }
+  return out;
+}
+function haken(len){
+  const span=len-2*STD.ueberstand_ueber_letzten_haken_m; if(span<=0) return 2;
+  let n=Math.max(2, Math.round(span/STD.hakenabstand_mittel_m)+1);
+  while(span/(n-1) > STD.hakenabstand_max_m+1e-9) n++; return n;
+}
+function zuschnitt(bedarf){
+  const stock=DB.montage.schiene_laengen_m.aktuell, rmin=STD.reststueck_min_m;
+  let reste=[], stangen=0, verb=0;
+  for(const need of [...bedarf].sort((a,b)=>b-a)){
+    let offen=need, teile=0;
+    while(offen>1e-9){
+      const pass=reste.filter(r=>r>=offen-1e-9).sort((a,b)=>a-b);
+      if(pass.length){ const r=pass[0]; reste.splice(reste.indexOf(r),1); teile++; if(r-offen>=rmin) reste.push(r-offen); offen=0; }
+      else if(offen<=stock+1e-9){ stangen++; teile++; if(stock-offen>=rmin) reste.push(stock-offen); offen=0; }
+      else { stangen++; teile++; offen-=stock; }
+    }
+    verb+=teile-1;
+  }
+  return {stangen, verb, verschnitt: reste.reduce((a,b)=>a+b,0)};
+}
+function teileListe(rects, dachtyp){
+  const t={}; const n=rects.length;
+  if(dachtyp==='balkon'){ t['NIRU SBR02']=n; return {t}; }
+  if(dachtyp==='flachdach') return {t, manuell:'Flachdach-Teile (NIRU-BR6 / NIRU-AR02) manuell zusammenstellen'};
+  const gr=gruppen(rects), ue=STD.ueberstand_ueber_letztes_modul_m;
+  const bedarf=[]; let bef=0, mittel=0, ende=0, kappen=0;
+  for(const g of gr){ const len=g[g.length-1][2]-g[0][0]+2*ue;
+    for(let i=0;i<2;i++){ bedarf.push(len); bef+=haken(len); kappen+=2; }
+    mittel+=2*(g.length-1); ende+=4; }
+  const z=zuschnitt(bedarf);
+  Object.assign(t,{'NIRU-A43A':z.stangen,'NIRU-SP-A43A':z.verb,'NIRU-RIC03':mittel,'NIRU-REC03':ende,'NIRU-EC-A43A':kappen});
+  t[{ziegel:'NIRU-HA02',trapezblech:'NIRU-U40',stehfalz:'NIRU-L01'}[dachtyp]]=bef;
+  return {t, verschnitt:z.verschnitt};
+}
+
+/* ---------- Schritt 3: Stringauslegung ---------- */
+function spannungen(m,n,tmin,tmax){ const k=m.tk_voc_pct_pro_k/100;
+  return {vocKalt:n*m.voc_v*(1+k*(tmin-25)), vmpStc:n*m.vmp_v, vmpHeiss:n*m.vmp_v*(1+k*(tmax-25))}; }
+function laengenbereich(m,s,tmin,tmax){
+  const g=[]; for(let n=1;n<40;n++){ const v=spannungen(m,n,tmin,tmax);
+    if(v.vocKalt<=Math.min(s.pv.max_spannung_v,m.max_systemspannung_v)&&v.vmpHeiss>=s.pv.mppt_bereich_v[0]&&v.vmpStc<=s.pv.mppt_bereich_v[1]) g.push(n); }
+  return g.length?[g[0],g[g.length-1]]:[null,null];
+}
+function zerl(n,lo,hi,maxStr=6,top=6){
+  const res=[], key=t=>t.join(',');
+  for(let k=1;k<=maxStr;k++){ if(k*lo>n||k*hi<n) continue; const q=Math.floor(n/k), r=n%k;
+    const t=[...Array(r).fill(q+1),...Array(k-r).fill(q)]; if(t.every(x=>x>=lo&&x<=hi)) res.push(t); }
+  const seen=new Set(res.map(key));
+  (function rec(rem,maxv,cur){ if(rem===0){ const kk=key(cur); if(!seen.has(kk)){seen.add(kk);res.push([...cur]);} return; }
+    if(cur.length>=maxStr) return;
+    for(let v=Math.min(maxv,rem);v>=lo;v--){ cur.push(v); rec(rem-v,v,cur); cur.pop(); } })(n,hi,[]);
+  res.sort((a,b)=>(Math.max(...a)-Math.min(...a))-(Math.max(...b)-Math.min(...b))||a.length-b.length);
+  return res.slice(0,top);
+}
+function gruppenAus(z){ const g={}; for(const l of z) g[l]=(g[l]||0)+1; return Object.entries(g).map(([l,c])=>[+l,c]).sort((a,b)=>b[0]-a[0]); }
+function zuordnung(items, cap, m){
+  function rek(items,i,frei,aus){
+    if(i===items.length) return aus;
+    const {fl,laenge,anz}=items[i];
+    for(const t of frei){ const [smax,ib,ii]=cap[t];
+      const kmax=Math.min(smax,Math.floor(ib/m.imp_a),Math.floor(ii/m.isc_a),anz);
+      for(let k=kmax;k>=1;k--){ const rest=anz-k;
+        const its= rest>0 ? [...items.slice(0,i+1),{fl,laenge,anz:rest},...items.slice(i+1)] : items;
+        const r=rek(its,i+1,frei.filter(x=>x!==t),[...aus,[t,fl,laenge,k]]); if(r) return r; } }
+    return null;
+  }
+  return rek(items,0,cap.map((_,i)=>i),[]);
+}
+function auslegen(modulId, wrModell, flaechen, tmin, tmax){
+  const m=modul(modulId), [s,w]=wrFind(wrModell), mp=w.mppt||s.mppt_gemeinsam;
+  const [lo,hi]=laengenbereich(m,s,tmin,tmax);
+  const b={lo,hi,tracker:[],fehler:[],hinweise:[],s,w,m};
+  if(lo===null){ b.fehler.push('Keine zulässige Stringlänge für dieses Modul an diesem Wechselrichter.'); return b; }
+  const ges=Object.values(flaechen).reduce((a,c)=>a+c,0), kwp=ges*m.pmax_wp/1000;
+  b.kwp=kwp; b.dcac=kwp*1000/w.ac_nenn_w;
+  if(w.pv_eingang_w && kwp*1000>w.pv_eingang_w) b.fehler.push(`DC-Leistung ${fmt(kwp,2)} kWp über max. PV-Eingang ${fmt(w.pv_eingang_w/1000,1)} kW.`);
+  const names=Object.keys(flaechen).filter(n=>flaechen[n]>0);
+  const opt=names.map(n=>zerl(flaechen[n],lo,hi));
+  const bad=names.filter((n,i)=>!opt[i].length);
+  if(bad.length){ b.fehler.push(`Fläche(n) ${bad.join(', ')}: Modulzahl lässt sich nicht in Strings zu ${lo}-${hi} Modulen zerlegen.`); return b; }
+  const ntr=mp.anzahl, cap=[...Array(ntr).keys()].map(i=>[mp.strings[i],mp.strom_betrieb_a[i],mp.strom_isc_a[i]]);
+  let lsg=null;
+  const idx=names.map(()=>0), lens=opt.map(o=>o.length);
+  const total=lens.reduce((a,c)=>a*c,1);
+  for(let c=0;c<total && !lsg;c++){
+    let rest=c; const pick=lens.map(L=>{const i=rest%L; rest=Math.floor(rest/L); return i;});
+    const items=[]; names.forEach((n,i)=>{ for(const [l,cnt] of gruppenAus(opt[i][pick[i]])) items.push({fl:n,laenge:l,anz:cnt}); });
+    lsg=zuordnung(items,cap,m);
+  }
+  if(!lsg && names.length){ b.fehler.push('Strings passen nicht auf die MPPT-Eingänge (zu viele Flächen oder Strings, oder Ströme zu hoch).'); return b; }
+  for(const [t,fl,l,k] of lsg.sort((a,b)=>a[0]-b[0])){
+    const v=spannungen(m,l,tmin,tmax), g={vocMax:Math.min(s.pv.max_spannung_v,m.max_systemspannung_v),mppt:s.pv.mppt_bereich_v,iscMax:cap[t][2],impMax:cap[t][1]};
+    const x={mppt:t+1,flaeche:fl,k,l,vocKalt:v.vocKalt,vmpStc:v.vmpStc,vmpHeiss:v.vmpHeiss,isc:k*m.isc_a,imp:k*m.imp_a,g};
+    x.ok = x.vocKalt<=g.vocMax && x.vmpHeiss>=g.mppt[0] && x.vmpStc<=g.mppt[1] && x.isc<=g.iscMax && x.imp<=g.impMax;
+    b.tracker.push(x);
+  }
+  if(s.pv.pruefen_mppt) b.hinweise.push(s.pv.pruefen_mppt);
+  if(m.bifazial) b.hinweise.push('Bifaziales Modul: Rückseitengewinn kann den Strom erhöhen, Stromreserve beachten.');
+  return b;
+}
+function speicherCheck(wrModell, serie, n){
+  const [s,w]=wrFind(wrModell), sp=DB.speicher_serien.find(x=>x.serie===serie);
+  const [loI,hiI]=s.batterie.spannung_v, out={fehler:[],hinweise:[]};
+  const [rl,rh]=sp.module_in_reihe; if(n<rl||n>rh) out.fehler.push(`${serie}: ${n} Module außerhalb ${rl}-${rh}.`);
+  let lo,hi;
+  if(sp.betriebsspannung_pro_modul_v){ lo=n*sp.betriebsspannung_pro_modul_v[0]; hi=n*sp.betriebsspannung_pro_modul_v[1]; }
+  else { lo=sp.modul_nennspannung_v*n*(166.4/204.8); hi=sp.modul_nennspannung_v*n*(700.8/614.4); }
+  out.lo=lo; out.hi=hi;
+  if(lo<loI||hi>hiI) out.fehler.push(`Speicherspannung ${fmt(lo,0)}-${fmt(hi,0)} V außerhalb Wechselrichter-Batterieeingang ${loI}-${hiI} V.`);
+  const iw=w.batterie_strom_a||s.batterie.strom_a; out.strom=Math.min(sp.strom_dauer_a,iw||sp.strom_dauer_a);
+  if(sp.pruefen) out.hinweise.push(sp.pruefen);
+  if(s.batterie.pruefen) out.hinweise.push(s.batterie.pruefen);
+  out.kwh=n*sp.modul_energie_kwh; out.sp=sp; return out;
+}
+
+/* ---------- Zustand ---------- */
+const S={mpp:1/40,img:null,imgBox:null,mode:'none',draft:[],aktiv:0,flaechen:[],res:null};
+const neueFlaeche=(i)=>({name:'Fläche '+(i+1),az:180,neigung:35,dachtyp:'ziegel',ausr:'hochkant',rand:0.30,hab:0.30,dach:[],hind:[]});
+const rad=g=>g*Math.PI/180;
+function frame(f){ const a=rad(f.az); return {pe:[-Math.cos(a),Math.sin(a)], d:[Math.sin(a),Math.cos(a)]}; }
+function toLocal(f,p){ const {pe,d}=frame(f), e=p[0]*S.mpp, n=-p[1]*S.mpp; return [e*pe[0]+n*pe[1], -(e*d[0]+n*d[1])]; }
+function fromLocal(f,u,v){ const {pe,d}=frame(f); const e=u*pe[0]-v*d[0], n=u*pe[1]-v*d[1]; return [e/S.mpp, -n/S.mpp]; }
+const cur=()=>S.flaechen[S.aktiv];
+
+/* ---------- Berechnung ---------- */
+function rechne(){
+  const m=modul($('modul').value), tmin=+$('tmin').value, tmax=+$('tmax').value;
+  const mz=S.flaechen.map(f=>{
+    if(f.dach.length<3) return {f,rects:[],roof:null};
+    const loc=f.dach.map(p=>toLocal(f,p)), umin=Math.min(...loc.map(p=>p[0])), vmin=Math.min(...loc.map(p=>p[1]));
+    const c=Math.cos(rad(f.neigung)), tr=p=>{const l=toLocal(f,p); return [l[0]-umin,(l[1]-vmin)/c];};
+    const dach=f.dach.map(tr), hind=f.hind.map(h=>h.map(tr));
+    const rects=belegen(dach,m,f.ausr,f.rand,0.02,hind,f.hab);
+    rects.sort((a,b)=>Math.round(a[1]*100)-Math.round(b[1]*100)||a[0]-b[0]);
+    return {f,rects,roof:{umin,vmin,c}};
+  });
+  const flaechen={}; mz.forEach(x=>{ if(x.rects.length) flaechen[x.f.name]=x.rects.length; });
+  const bb = Object.keys(flaechen).length ? auslegen($('modul').value,$('wr').value,flaechen,tmin,tmax) : null;
+  let sp=null; const n=+$('spn').value;
+  if(n>0 && bb && !bb.fehler.some(x=>x.startsWith('Keine'))) sp=speicherCheck($('wr').value,$('spserie').value,n);
+  // Stückliste
+  const bom=[]; const nMod=mz.reduce((a,x)=>a+x.rects.length,0);
+  if(nMod){
+    const [s,w]=wrFind($('wr').value);
+    bom.push(['Module',m.id,`${m.hersteller} ${m.typ} ${m.pmax_wp} Wp`,nMod,'Artikelnr. in Lexoffice prüfen']);
+    bom.push(['Wechselrichter',w.modell,`Deye Hybrid-Wechselrichter ${w.ac_nenn_w/1000} kW`,1,'Artikelnr. in Lexoffice prüfen']);
+    if(n>0){ const spd=DB.speicher_serien.find(x=>x.serie===$('spserie').value);
+      bom.push(['Speicher',spd.modul,`${spd.serie} Batteriemodul ${spd.modul_energie_kwh} kWh`,n,`${fmt(n*spd.modul_energie_kwh,2)} kWh gesamt; Zubehör prüfen`]); }
+    const sum={}, man=[];
+    mz.forEach(x=>{ if(!x.rects.length) return; const r=teileListe(x.rects,x.f.dachtyp);
+      Object.entries(r.t).forEach(([k,v])=>sum[k]=(sum[k]||0)+v); if(r.manuell) man.push(`Fläche ${x.f.name}: ${r.manuell}`); });
+    Object.entries(sum).forEach(([k,v])=>bom.push(['Montage',k,TEILE[k].bezeichnung,v,'']));
+    man.forEach(t=>bom.push(['Montage','manuell',t,'','manuell zusammenstellen']));
+    bom.push(['Ergänzen','manuell','DC-Kabel, AC-Kabel, Schutzgeräte, Überspannungsschutz, Zähler, Kleinteile','','nicht berechnet']);
+  }
+  S.res={mz,b:bb,sp,bom,nMod,m};
+  zeige(); draw();
+}
+
+/* ---------- Anzeige ---------- */
+function zeige(){
+  const R=S.res; if(!R) return;
+  const kwp=R.nMod*R.m.pmax_wp/1000;
+  $('kpis').innerHTML=[[R.nMod,'Module'],[fmt(kwp,2),'kWp'],[R.sp?fmt(R.sp.kwh,1):'–','kWh Speicher'],[R.b?fmt(R.b.dcac,2):'–','DC/AC']]
+    .map(([a,b])=>`<div class="kpi"><b>${a}</b><small>${b}</small></div>`).join('');
+  $('tFl').innerHTML=`<table><tr><th>Fläche</th><th class="n">Module</th><th class="n">kWp</th><th class="n">Neigung</th><th class="n">Azimut</th><th>Typ</th></tr>`+
+    R.mz.map(x=>`<tr><td>${esc(x.f.name)}</td><td class="n">${x.rects.length}</td><td class="n">${fmt(x.rects.length*R.m.pmax_wp/1000,2)}</td><td class="n">${x.f.neigung}°</td><td class="n">${x.f.az}°</td><td>${x.f.dachtyp}</td></tr>`).join('')+`</table>`;
+  const b=R.b;
+  if(!b){ $('tStr').innerHTML='<p class="hint">Noch keine Module belegt.</p>'; $('msgStr').innerHTML=''; }
+  else{
+    $('tStr').innerHTML=`<table><tr><th>MPPT</th><th>Fläche</th><th class="n">Strings</th><th class="n">Module/String</th><th class="n">Voc kalt (max ${b.tracker[0]?b.tracker[0].g.vocMax:'–'})</th><th class="n">Vmp heiß-STC</th><th class="n">Isc</th><th class="n">Imp</th><th>Prüfung</th></tr>`+
+      b.tracker.map(t=>`<tr><td>${t.mppt}</td><td>${esc(t.flaeche)}</td><td class="n">${t.k}</td><td class="n">${t.l}</td><td class="n">${fmt(t.vocKalt)} V</td><td class="n">${fmt(t.vmpHeiss,0)}-${fmt(t.vmpStc,0)} V <small>(${t.g.mppt[0]}-${t.g.mppt[1]})</small></td><td class="n">${fmt(t.isc)} A <small>(${t.g.iscMax})</small></td><td class="n">${fmt(t.imp)} A <small>(${t.g.impMax})</small></td><td><span class="pill ${t.ok?'ok':'bad'}">${t.ok?'OK':'PRÜFEN'}</span></td></tr>`).join('')+`</table>`;
+    $('msgStr').innerHTML=b.fehler.map(x=>`<p class="msg bad">${esc(x)}</p>`).join('')+b.hinweise.map(x=>`<p class="msg warn">${esc(x)}</p>`).join('');
+  }
+  if(R.sp){ const sp=R.sp;
+    $('msgSp').innerHTML=`<p class="mono">${esc($('spserie').value)} x${$('spn').value} · ${fmt(sp.kwh,2)} kWh · ${fmt(sp.lo,0)}-${fmt(sp.hi,0)} V · ${sp.strom} A nutzbar</p>`+
+      (sp.fehler.length?sp.fehler.map(x=>`<p class="msg bad">${esc(x)}</p>`).join(''):'<p class="msg"><span class="pill ok">OK</span> Spannung und Strom passen zum Wechselrichter.</p>')+
+      sp.hinweise.map(x=>`<p class="msg warn">${esc(x)}</p>`).join('');
+  } else $('msgSp').innerHTML='<p class="hint">Kein Speicher gewählt.</p>';
+  $('tBom').innerHTML=R.bom.length?`<table><tr><th>Gruppe</th><th>Artikel</th><th>Bezeichnung</th><th class="n">Menge</th><th>Hinweis</th></tr>`+
+    R.bom.map(r=>`<tr><td>${r[0]}</td><td class="mono">${esc(r[1])}</td><td style="white-space:normal">${esc(r[2])}</td><td class="n">${r[3]}</td><td style="white-space:normal">${esc(r[4])}</td></tr>`).join('')+`</table>`:'<p class="hint">Noch keine Stückliste.</p>';
+  $('raw').value=R.bom.map(r=>r.join('\t')).join('\n');
+}
+
+/* ---------- Zeichenfläche ---------- */
+const cv=$('cv'), ctx=cv.getContext('2d');
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function poly(pts,fill,stroke){ if(!pts.length) return; ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath(); if(fill){ctx.fillStyle=fill;ctx.fill();} if(stroke){ctx.strokeStyle=stroke;ctx.stroke();} }
+function draw(){
+  if(S.mapMode){ drawMap(); return; }
+  ctx.clearRect(0,0,cv.width,cv.height); ctx.fillStyle=css('--canvas'); ctx.fillRect(0,0,cv.width,cv.height);
+  if(S.img){ const b=S.imgBox; ctx.drawImage(S.img,b.x,b.y,b.w,b.h); }
+  else{ ctx.strokeStyle=css('--grid'); ctx.lineWidth=1; const step=5/S.mpp;
+    for(let x=0;x<cv.width;x+=step){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,cv.height);ctx.stroke();}
+    for(let y=0;y<cv.height;y+=step){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(cv.width,y);ctx.stroke();}
+    ctx.fillStyle=css('--muted'); ctx.font='12px sans-serif'; ctx.fillText('Raster 5 m',8,cv.height-8); }
+  const acc=css('--accent'); ctx.lineWidth=2;
+  S.flaechen.forEach((f,i)=>{ const a=i===S.aktiv; ctx.globalAlpha=a?1:.45;
+    poly(f.dach, a?'rgba(120,150,160,.28)':'rgba(120,150,160,.15)', acc);
+    f.hind.forEach(h=>poly(h,'rgba(200,70,60,.55)','#b42318'));
+    if(f.dach.length){ const mnx=Math.min(...f.dach.map(p=>p[0])), mny=Math.min(...f.dach.map(p=>p[1]));
+      ctx.fillStyle=css('--fg'); ctx.font='bold 13px sans-serif'; ctx.fillText(f.name,mnx,Math.max(14,mny-6)); }
+    ctx.globalAlpha=1; });
+  if(S.res){ S.res.mz.forEach(x=>{ if(!x.roof) return; const f=x.f;
+    const strs=[]; if(S.res.b) S.res.b.tracker.filter(t=>t.flaeche===f.name).forEach(t=>{ for(let k=0;k<t.k;k++) strs.push(t.l); });
+    const folge=[]; strs.forEach((l,si)=>{ for(let j=0;j<l;j++) folge.push(si); });
+    x.rects.forEach((r,ri)=>{ const pts=corners(r).map(c=>fromLocal(f,c[0]+x.roof.umin,c[1]*x.roof.c+x.roof.vmin));
+      const si=folge[ri]; poly(pts,si===undefined?'#777':COL[si%COL.length],'rgba(255,255,255,.85)'); }); }); }
+  // Entwurf
+  if(S.draft.length){ ctx.strokeStyle=S.mode==='scale'?'#e0a030':acc; ctx.lineWidth=2; ctx.beginPath(); S.draft.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke();
+    S.draft.forEach(p=>{ctx.fillStyle=S.mode==='scale'?'#e0a030':acc; ctx.beginPath(); ctx.arc(p[0],p[1],4,0,7); ctx.fill();}); }
+}
+function pos(e){ const r=cv.getBoundingClientRect(); return [(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height]; }
+function status(t){ $('status').textContent=t; }
+function setMode(m){ S.mode=m; S.draft=[]; ['bScale','bDach','bHind'].forEach(id=>$(id).classList.remove('on'));
+  if(m==='scale') $('bScale').classList.add('on'); if(m==='dach') $('bDach').classList.add('on'); if(m==='hind') $('bHind').classList.add('on');
+  $('scaleBox').hidden=true;
+  if(map){ const d=(m==='dach'||m==='hind'); d?map.doubleClickZoom.disable():map.doubleClickZoom.enable(); map.getCanvas().style.cursor=d?'crosshair':''; }
+  status({none:'',scale:'Zwei Punkte einer Strecke mit bekannter Länge anklicken.',dach:'Eckpunkte der Dachfläche anklicken, dann „Fertig“.',hind:'Eckpunkte des Hindernisses anklicken, dann „Fertig“.'}[m]); draw(); }
+cv.addEventListener('click',e=>{ if(S.mode==='none') return; const p=pos(e);
+  if(S.mode==='scale'){ if(S.draft.length>=2) S.draft=[]; S.draft.push(p); if(S.draft.length===2){ $('scaleBox').hidden=false; status('Länge der Strecke eingeben.'); } }
+  else S.draft.push(p); draw(); });
+$('scaleOk').onclick=()=>{ const L=+$('scaleLen').value; if(S.draft.length!==2||!(L>0)) return;
+  const d=Math.hypot(S.draft[0][0]-S.draft[1][0],S.draft[0][1]-S.draft[1][1]); if(d<2) return;
+  const alt=S.mpp; S.mpp=L/d; const q=alt/S.mpp; 
+  S.flaechen.forEach(f=>{ /* vorhandene Konturen behalten ihre Pixellage, Maße folgen dem neuen Maßstab */ });
+  setMode('none'); status(`Maßstab gesetzt: ${fmt(S.mpp*100,1)} cm pro Pixel.`); rechne(); };
+$('bScale').onclick=()=>setMode(S.mode==='scale'?'none':'scale');
+$('bDach').onclick=()=>setMode(S.mode==='dach'?'none':'dach');
+$('bHind').onclick=()=>setMode(S.mode==='hind'?'none':'hind');
+$('bFertig').onclick=()=>{ if(S.mode==='dach'&&S.draft.length>=3){ cur().dach=S.draft.slice(); cur().hind=[]; setMode('none'); rechne(); }
+  else if(S.mode==='hind'&&S.draft.length>=3){ cur().hind.push(S.draft.slice()); setMode('none'); rechne(); } else status('Mindestens 3 Punkte nötig.'); };
+$('bClear').onclick=()=>{ cur().dach=[]; cur().hind=[]; setMode('none'); rechne(); };
+$('bImg').onclick=()=>$('fileImg').click();
+$('fileImg').onchange=e=>{ const file=e.target.files[0]; if(!file) return; const rd=new FileReader();
+  rd.onload=()=>{ const im=new Image(); im.onload=()=>{ S.img=im; const k=Math.min(cv.width/im.width,cv.height/im.height);
+      S.imgBox={w:im.width*k,h:im.height*k,x:(cv.width-im.width*k)/2,y:(cv.height-im.height*k)/2}; S.mpp=30/S.imgBox.w;
+      S.flaechen.forEach(f=>{f.dach=[];f.hind=[];}); S.res=null; zeige(); setMode('scale'); status('Bild geladen. Bitte zuerst den Maßstab setzen: zwei Punkte anklicken.'); };
+    im.src=rd.result; }; rd.readAsDataURL(file); };
+$('rOk').onclick=()=>{ const f=cur(), bw=+$('rb').value, bt=+$('rt').value; if(!(bw>0&&bt>0)) return;
+  const c=toLocal(f,centerPx());
+  f.dach=[[-bw/2,-bt/2],[bw/2,-bt/2],[bw/2,bt/2],[-bw/2,bt/2]].map(q=>fromLocal(f,c[0]+q[0],c[1]+q[1])); f.hind=[]; rechne(); };
+
+/* ---------- Formulare ---------- */
+function fuellListen(){
+  $('modul').innerHTML=DB.module.map(m=>`<option value="${esc(m.id)}">${esc(m.hersteller)} ${m.pmax_wp} Wp (${esc(m.id)})</option>`).join('');
+  $('wr').innerHTML=DB.wechselrichter_serien.map(s=>`<optgroup label="${esc(s.serie)}">`+s.modelle.map(w=>`<option value="${esc(w.modell)}">${esc(w.modell)}</option>`).join('')+'</optgroup>').join('');
+  $('spserie').innerHTML=DB.speicher_serien.map(s=>`<option>${esc(s.serie)}</option>`).join('');
+}
+function listeFlaechen(){
+  $('flist').innerHTML=S.flaechen.map((f,i)=>`<button class="${i===S.aktiv?'sel':''}" data-i="${i}">${esc(f.name)}</button>`).join('');
+  document.querySelectorAll('#flist button').forEach(b=>b.onclick=()=>{ S.aktiv=+b.dataset.i; listeFlaechen(); draw(); });
+  const f=cur(); $('fname').value=f.name; $('faz').value=f.az; $('fneig').value=f.neigung; $('fdt').value=f.dachtyp; $('fausr').value=f.ausr; $('frand').value=f.rand; $('fhab').value=f.hab;
+}
+[['fname','name',String],['faz','az',Number],['fneig','neigung',Number],['fdt','dachtyp',String],['fausr','ausr',String],['frand','rand',Number],['fhab','hab',Number]].forEach(([id,k,T])=>{
+  $(id).addEventListener('change',()=>{ const f=cur(); f[k]=T($(id).value); if(k==='name') listeFlaechen(); if(S.res) rechne(); else draw(); }); });
+['modul','wr','spserie','spn','tmin','tmax'].forEach(id=>$(id).addEventListener('change',rechne));
+$('bCalc').onclick=rechne;
+$('addF').onclick=()=>{ S.flaechen.push(neueFlaeche(S.flaechen.length)); S.aktiv=S.flaechen.length-1; listeFlaechen(); draw(); };
+$('delF').onclick=()=>{ if(S.flaechen.length<2) return; S.flaechen.splice(S.aktiv,1); S.aktiv=0; listeFlaechen(); rechne(); };
+$('bCopy').onclick=async()=>{ const t=$('raw').value; try{ await navigator.clipboard.writeText(t); $('bCopy').textContent='Kopiert'; setTimeout(()=>$('bCopy').textContent='In Zwischenablage kopieren',1500); }
+  catch(e){ $('rawBox').open=true; $('raw').select(); } };
+
+
+/* ---------- Karte ---------- */
+let map=null, mapReady=false; S.org=null; S.mapMode=false;
+const BASEN={
+  nrw:{url:'https://www.wms.nrw.de/geobasis/wms_nw_dop?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=nw_dop_rgb&STYLES=&FORMAT=image/jpeg&CRS=EPSG:3857&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}',attr:'© Geobasis NRW, dl-de/zero-2-0'},
+  rlp:{url:'https://geo4.service24.rlp.de/wms/rp_dop40.fcgi?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=rp_dop40&STYLES=&FORMAT=image/jpeg&CRS=EPSG:3857&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}',attr:'© GeoBasis-DE / LVermGeoRP'},
+  osm:{url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',attr:'© OpenStreetMap-Mitwirkende'}};
+const centerPx=()=> (S.mapMode&&map&&S.org)?llToPx(map.getCenter()):[cv.width/2,cv.height/2];
+function llToPx(ll){ const e=(ll.lng-S.org.lng)*111320*Math.cos(rad(S.org.lat)), n=(ll.lat-S.org.lat)*110574; return [e/S.mpp,-n/S.mpp]; }
+function pxToLl(p){ const e=p[0]*S.mpp, n=-p[1]*S.mpp; return [S.org.lng+e/(111320*Math.cos(rad(S.org.lat))), S.org.lat+n/110574]; }
+function initMap(){
+  if(map){ map.resize(); return; }
+  const sources={}, layers=[];
+  for(const k of Object.keys(BASEN)){ sources[k]={type:'raster',tiles:[BASEN[k].url],tileSize:256,maxzoom:20,attribution:BASEN[k].attr};
+    layers.push({id:k,type:'raster',source:k,layout:{visibility:k==='nrw'?'visible':'none'}}); }
+  map=new maplibregl.Map({container:'map',style:{version:8,sources,layers},center:[8.9242,52.2194],zoom:19,maxZoom:21});
+  map.addControl(new maplibregl.NavigationControl({showCompass:true}),'top-right');
+  map.addControl(new maplibregl.ScaleControl({unit:'metric'}),'bottom-left');
+  S.org={lng:8.9242,lat:52.2194}; S.mpp=1/40;
+  map.on('load',()=>{
+    for(const id of ['fl','hi','mo','dr']) map.addSource(id,{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+    map.addLayer({id:'fl-f',type:'fill',source:'fl',paint:{'fill-color':'#78969f','fill-opacity':['case',['get','a'],0.3,0.15]}});
+    map.addLayer({id:'fl-l',type:'line',source:'fl',paint:{'line-color':'#0d9fb8','line-width':2}});
+    map.addLayer({id:'hi-f',type:'fill',source:'hi',paint:{'fill-color':'#c8463c','fill-opacity':0.6}});
+    map.addLayer({id:'mo-f',type:'fill',source:'mo',paint:{'fill-color':['get','c'],'fill-opacity':0.9}});
+    map.addLayer({id:'mo-l',type:'line',source:'mo',paint:{'line-color':'#ffffff','line-width':1}});
+    map.addLayer({id:'dr-l',type:'line',source:'dr',filter:['==',['geometry-type'],'LineString'],paint:{'line-color':'#f0a020','line-width':2}});
+    map.addLayer({id:'dr-p',type:'circle',source:'dr',filter:['==',['geometry-type'],'Point'],paint:{'circle-radius':4,'circle-color':'#f0a020'}});
+    mapReady=true; drawMap(); });
+  map.on('click',e=>{ if(S.mode!=='dach'&&S.mode!=='hind') return; S.draft.push(llToPx(e.lngLat)); drawMap(); });
+}
+const ring=pts=>{ const r=pts.map(pxToLl); r.push(r[0]); return r; };
+function drawMap(){
+  if(!mapReady||!S.org) return;
+  const fl=[],hi=[],mo=[],dr=[];
+  S.flaechen.forEach((f,i)=>{ if(f.dach.length>=3) fl.push({type:'Feature',properties:{a:i===S.aktiv},geometry:{type:'Polygon',coordinates:[ring(f.dach)]}});
+    f.hind.forEach(h=>hi.push({type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[ring(h)]}})); });
+  if(S.res) S.res.mz.forEach(x=>{ if(!x.roof) return; const f=x.f, strs=[];
+    if(S.res.b) S.res.b.tracker.filter(t=>t.flaeche===f.name).forEach(t=>{ for(let k=0;k<t.k;k++) strs.push(t.l); });
+    const folge=[]; strs.forEach((l,si)=>{ for(let j=0;j<l;j++) folge.push(si); });
+    x.rects.forEach((r,ri)=>{ const pts=corners(r).map(c=>fromLocal(f,c[0]+x.roof.umin,c[1]*x.roof.c+x.roof.vmin)); const si=folge[ri];
+      mo.push({type:'Feature',properties:{c:si===undefined?'#777777':COL[si%COL.length]},geometry:{type:'Polygon',coordinates:[ring(pts)]}}); }); });
+  if(S.draft.length>=2) dr.push({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:S.draft.map(pxToLl)}});
+  S.draft.forEach(p=>dr.push({type:'Feature',properties:{},geometry:{type:'Point',coordinates:pxToLl(p)}}));
+  const set=(id,f)=>map.getSource(id).setData({type:'FeatureCollection',features:f});
+  set('fl',fl); set('hi',hi); set('mo',mo); set('dr',dr);
+}
+$('basis').onchange=()=>{ if(!map) return; for(const k of Object.keys(BASEN)) map.setLayoutProperty(k,'visibility',k===$('basis').value?'visible':'none'); };
+$('bSuche').onclick=async()=>{ const q=$('suche').value.trim(); if(!q||!map) return; status('Suche …');
+  try{ const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q)); const j=await r.json();
+    if(!j.length){ status('Adresse nicht gefunden.'); return; }
+    map.flyTo({center:[+j[0].lon,+j[0].lat],zoom:20}); status(j[0].display_name); }catch(e){ status('Suche nicht erreichbar.'); } };
+$('suche').addEventListener('keydown',e=>{ if(e.key==='Enter') $('bSuche').click(); });
+$('modus').onchange=()=>{ const k=$('modus').value==='karte'; S.mapMode=k; $('map').hidden=!k; cv.hidden=k; $('suchBox').hidden=!k; $('kartenWahl').hidden=!k;
+  $('bImg').hidden=k; $('bScale').hidden=k; S.flaechen.forEach(f=>{f.dach=[];f.hind=[];}); S.res=null; setMode('none');
+  if(k){ initMap(); S.mpp=1/40; const c=map.getCenter(); S.org={lng:c.lng,lat:c.lat}; setTimeout(()=>map.resize(),50); } else { S.mpp=1/40; }
+  zeige(); draw(); };
+
+/* ---------- Ertragswerte (PVGIS, EU-Kommission JRC) ---------- */
+const MON=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+async function ertrag(){
+  const R=S.res, out=$('tErt');
+  if(!R||!R.nMod){ out.innerHTML='<p class="hint">Erst Module belegen.</p>'; return; }
+  if(!(S.mapMode&&S.org)){ out.innerHTML='<p class="msg warn">Der Ertrag braucht den Standort. Bitte in der Kartenansicht arbeiten.</p>'; return; }
+  out.innerHTML='<p class="hint">Rechne …</p>';
+  const loss=+$('loss').value, rows=[], mon=Array(12).fill(0); let tot=0, kwpAll=0, fehler=null;
+  for(const x of R.mz){ if(!x.rects.length) continue;
+    const kwp=x.rects.length*R.m.pmax_wp/1000, asp=((x.f.az-180+540)%360)-180;
+    const url=`https://re.jrc.ec.europa.eu/api/v5_3/PVcalc?lat=${S.org.lat.toFixed(5)}&lon=${S.org.lng.toFixed(5)}&peakpower=${kwp.toFixed(3)}&loss=${loss}&angle=${x.f.neigung}&aspect=${asp}&outputformat=json&browser=0`;
+    try{ const r=await fetch(url); if(!r.ok) throw new Error('HTTP '+r.status); const j=await r.json();
+      const ey=j.outputs.totals.fixed.E_y; j.outputs.monthly.fixed.forEach(m=>mon[m.month-1]+=m.E_m);
+      rows.push([x.f.name,kwp,x.f.az,x.f.neigung,ey,ey/kwp]); tot+=ey; kwpAll+=kwp; }
+    catch(e){ fehler='PVGIS ist nicht erreichbar oder hat die Anfrage abgelehnt ('+e.message+').'; break; } }
+  if(fehler){ out.innerHTML=`<p class="msg bad">${esc(fehler)}</p>`; return; }
+  const mx=Math.max(...mon);
+  out.innerHTML=`<div class="tw"><table><tr><th>Fläche</th><th class="n">kWp</th><th class="n">Azimut</th><th class="n">Neigung</th><th class="n">kWh/Jahr</th><th class="n">kWh/kWp</th></tr>`+
+    rows.map(r=>`<tr><td>${esc(r[0])}</td><td class="n">${fmt(r[1],2)}</td><td class="n">${r[2]}°</td><td class="n">${r[3]}°</td><td class="n">${fmt(r[4],0)}</td><td class="n">${fmt(r[5],0)}</td></tr>`).join('')+
+    `<tr><td><b>Gesamt</b></td><td class="n">${fmt(kwpAll,2)}</td><td></td><td></td><td class="n"><b>${fmt(tot,0)}</b></td><td class="n">${fmt(tot/kwpAll,0)}</td></tr></table></div>`+
+    `<div style="display:flex;gap:4px;align-items:flex-end;height:110px;margin-top:12px">`+mon.map((v,i)=>`<div style="flex:1;text-align:center;font-size:11px;color:var(--muted)"><div title="${fmt(v,0)} kWh" style="background:var(--accent);height:${Math.max(2,v/mx*80)}px;border-radius:2px 2px 0 0"></div>${MON[i]}</div>`).join('')+`</div>`+
+    `<p class="hint">Quelle: PVGIS (Europäische Kommission, Joint Research Centre), Strahlungsdaten aus Satellitenmessungen, mittleres Jahr. Prognose ohne Verschattung, ohne Eigenverbrauch und Speicher. Tatsächliche Erträge schwanken von Jahr zu Jahr.</p>`;
+}
+$('bErtrag').onclick=ertrag;
+
+/* ---------- Start mit Beispielprojekt ---------- */
+fuellListen();
+$('modul').value='JAM54D41-460/LR'; $('wr').value='SUN-10K-SG02HP3-EU-DM2'; $('spserie').value='GB-L Plus';
+S.flaechen=[neueFlaeche(0)]; S.flaechen[0].name='Süd';
+S.mapMode=true; cv.hidden=true; initMap();
+{ const f=cur(); const c=toLocal(f,centerPx()); const bw=10, bt=5;
+  f.dach=[[-bw/2,-bt/2],[bw/2,-bt/2],[bw/2,bt/2],[-bw/2,bt/2]].map(q=>fromLocal(f,c[0]+q[0],c[1]+q[1]));
+  const k=[[1,-0.3],[1.6,-0.3],[1.6,0.3],[1,0.3]]; f.hind=[k.map(q=>fromLocal(f,c[0]+q[0],c[1]+q[1]))]; }
+$('bImg').hidden=true; $('bScale').hidden=true;
+listeFlaechen(); rechne();
+</script>
+
+</body></html>
